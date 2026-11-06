@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdir, appendFile } from "node:fs/promises";
+import { mkdir, appendFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 export type EventKind = "agent.start" | "agent.end" | "tool.start" | "tool.end" | "tool.error" | "event";
@@ -23,6 +23,10 @@ export interface RecorderOptions {
   redactedKeys?: string[];
   clock?: () => Date;
   idGenerator?: (bytes: number) => string;
+  /** Maximum size of one JSONL file before rotating it. Defaults to 5 MiB. */
+  maxFileBytes?: number;
+  /** Number of rotated copies to keep alongside the active file. Defaults to 3. */
+  maxFiles?: number;
 }
 export interface RunOptions { name?: string; attributes?: Record<string, unknown>; traceId?: string; runId?: string; }
 export interface ToolOptions { name?: string; attributes?: Record<string, unknown>; }
@@ -55,6 +59,8 @@ export class FlightRecorder {
   private readonly extraRedactedKeys: string[];
   private readonly clock: () => Date;
   private readonly id: (bytes: number) => string;
+  private readonly maxFileBytes: number;
+  private readonly maxFiles: number;
   private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: RecorderOptions = {}) {
@@ -63,6 +69,10 @@ export class FlightRecorder {
     this.extraRedactedKeys = options.redactedKeys ?? [];
     this.clock = options.clock ?? (() => new Date());
     this.id = options.idGenerator ?? hexId;
+    this.maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
+    this.maxFiles = options.maxFiles ?? 3;
+    if (!Number.isSafeInteger(this.maxFileBytes) || this.maxFileBytes < 1) throw new RangeError("maxFileBytes must be a positive safe integer");
+    if (!Number.isSafeInteger(this.maxFiles) || this.maxFiles < 1) throw new RangeError("maxFiles must be a positive safe integer");
   }
 
   async run<T>(options: RunOptions, fn: (run: AgentRun) => Promise<T> | T): Promise<T> {
@@ -92,11 +102,27 @@ export class FlightRecorder {
       ...(input.error ? { error: this.shouldRedact ? redact(input.error, this.extraRedactedKeys) as { name: string; message: string } : input.error } : {})
     };
     const line = `${JSON.stringify(event)}\n`;
-    this.writeQueue = this.writeQueue.then(async () => {
+    this.writeQueue = this.writeQueue.catch(() => undefined).then(async () => {
       await mkdir(dirname(this.file), { recursive: true });
+      const bytes = Buffer.byteLength(line, "utf8");
+      if (bytes > this.maxFileBytes) throw new RangeError(`Trace event is ${bytes} bytes, larger than maxFileBytes (${this.maxFileBytes})`);
+      let currentBytes = 0;
+      try { currentBytes = (await stat(this.file)).size; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if (currentBytes + bytes > this.maxFileBytes) await this.rotate();
       await appendFile(this.file, line, { encoding: "utf8", mode: 0o600 });
     });
     return this.writeQueue;
+  }
+
+  private async rotate(): Promise<void> {
+    await rm(`${this.file}.${this.maxFiles}`, { force: true });
+    for (let index = this.maxFiles - 1; index >= 1; index--) {
+      try { await rename(`${this.file}.${index}`, `${this.file}.${index + 1}`); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+    try { await rename(this.file, `${this.file}.1`); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
 }
 

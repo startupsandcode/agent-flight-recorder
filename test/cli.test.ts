@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,8 @@ test("CLI lists, finds, and explains a failed run from a custom trace file", asy
     const timeline = runCli(["show", "run-for-cli-test", file], dir);
     assert.match(timeline, /agent\.start.*checkout-agent/);
     assert.match(timeline, /tool\.error.*charge_card.*Payment provider timed out/);
+    const latest = runCli(["show", "latest", "--file", file], dir);
+    assert.match(latest, /checkout-agent/);
 
     assert.throws(() => runCli(["show", "missing-run", file], dir), /Run not found/);
   } finally {
@@ -39,4 +41,13 @@ test("CLI help works without a trace file", () => {
   const output = runCli(["--help"], resolve("."));
   assert.match(output, /afr list/);
   assert.match(output, /afr failures/);
+});
+
+test("CLI explains malformed JSON with its line number", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "afr-cli-invalid-"));
+  const file = join(dir, "broken.jsonl");
+  try {
+    await writeFile(file, "{}\nnot-json\n", "utf8");
+    assert.throws(() => runCli(["list", "--file", file], dir), /Invalid JSON on line 2/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
