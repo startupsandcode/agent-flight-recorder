@@ -42,10 +42,15 @@ Tool or run errors are recorded and rethrown. See `examples/tool-error.ts` for a
 ```bash
 node dist/src/cli.js list
 node dist/src/cli.js failures
-node dist/src/cli.js show <run-id>
+node dist/src/cli.js show latest
+node dist/src/cli.js show <run-id> --file ./debug-trace.jsonl
 ```
 
-All commands accept a custom JSONL path. See the CLI help for details.
+Use `--file` (or `-f`) to select a trace file. The original positional file syntax remains supported. `show latest` displays the most recently started run in that file. See the CLI help for details.
+
+## Trace file size
+
+The recorder rotates files at 5 MiB by default and keeps three rotated copies beside the active trace. Configure this with `new FlightRecorder({ maxFileBytes: 5 * 1024 * 1024, maxFiles: 3 })`. A single event larger than the configured limit is rejected so it cannot bypass the file size bound. Write errors are returned to the caller.
 
 ## Privacy and redaction
 
