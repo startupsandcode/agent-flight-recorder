@@ -21,7 +21,7 @@ npm install
 npm run build
 ```
 
-When published, install with `npm install @startupsandcode/agent-flight-recorder`. In this repository, use `npm link` after building to make the `afr` command available globally, or run it with `node dist/src/cli.js`.
+When published, install with `npm install @startupsandcode/agent-flight-recorder`. In this repository, run the CLI with `node dist/src/cli.js`, or run `npm link` after building to add the `afr` command to your path.
 
 ## Instrument an agent
 
