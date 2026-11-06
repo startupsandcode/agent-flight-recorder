@@ -10,5 +10,5 @@ try {
     }, { attributes: { endpoint: "https://orders.example.test" } });
   });
 } catch {
-  console.log("The sample agent failed as expected. Inspect it with: npx afr list");
+  console.log("The sample agent failed as expected. Inspect it with: node dist/src/cli.js list");
 }
