@@ -26,6 +26,7 @@ test("redacts secret keys and credentials embedded in strings by default", async
   assert.deepEqual(redact({ apiKey: "abc", nested: { note: "Authorization: Bearer abc.def" } }), {
     apiKey: "[REDACTED]", nested: { note: "Authorization: Bearer [REDACTED]" }
   });
+  assert.equal(redact('upstream error: {"api_key": "topsecret"}'), 'upstream error: {"api_key": "[REDACTED]"}');
   const dir = await mkdtemp(join(tmpdir(), "afr-"));
   try {
     const file = join(dir, "trace.jsonl");
