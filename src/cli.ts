@@ -7,9 +7,9 @@ function help(): void {
   console.log(`Agent Flight Recorder v0.1
 
 Usage:
-  afr list [file]             List recorded runs
-  afr show <run-id> [file]    Show a run timeline
-  afr failures [file]         List failed tool calls
+  afr list [--file <path>]             List recorded runs
+  afr show <run-id|latest> [--file <path>]  Show a run timeline
+  afr failures [--file <path>]         List failed tool calls
 
 Default file: .afr/traces.jsonl`);
 }
@@ -44,9 +44,19 @@ function timeline(events: TraceEvent[]): void {
   }
 }
 async function main(): Promise<void> {
-  const [command, a, b] = process.argv.slice(2);
+  const [command, ...args] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help") return help();
-  const file = command === "show" ? (b ?? ".afr/traces.jsonl") : (a ?? ".afr/traces.jsonl");
+  const fileFlag = args.findIndex((arg) => arg === "--file" || arg === "-f");
+  let file = ".afr/traces.jsonl";
+  if (fileFlag !== -1) {
+    const selectedFile = args[fileFlag + 1];
+    if (!selectedFile) throw new Error("--file requires a path");
+    file = selectedFile;
+    args.splice(fileFlag, 2);
+  } else if (args.length > (command === "show" ? 1 : 0)) {
+    // Keep accepting the original positional file argument for v0.1 users.
+    file = args.pop()!;
+  }
   const events = await load(file);
   if (command === "list") return summary(events);
   if (command === "failures") {
@@ -56,9 +66,13 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "show") {
-    if (!a) throw new Error("Usage: afr show <run-id> [file]");
-    const selected = events.filter((e) => e.runId === a);
-    if (!selected.length) throw new Error(`Run not found: ${a}`);
+    const requested = args[0];
+    if (!requested) throw new Error("Usage: afr show <run-id|latest> [--file <path>]");
+    const starts = events.filter((event) => event.kind === "agent.start");
+    const runId = requested === "latest" ? starts.at(-1)?.runId : requested;
+    if (!runId) throw new Error("No agent runs found in this trace file");
+    const selected = events.filter((e) => e.runId === runId);
+    if (!selected.length) throw new Error(`Run not found: ${runId}`);
     return timeline(selected);
   }
   help(); process.exitCode = 1;
