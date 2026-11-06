@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FlightRecorder, redact } from "../src/index.js";
@@ -47,5 +47,25 @@ test("writes concurrent events as valid complete JSONL records", async () => {
     const lines = (await readFile(file, "utf8")).trim().split("\n");
     assert.equal(lines.length, 22);
     for (const line of lines) JSON.parse(line);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("rotates traces at the configured size and rejects a single oversized event", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "afr-"));
+  try {
+    const file = join(dir, "trace.jsonl");
+    const recorder = new FlightRecorder({ file, maxFileBytes: 300, maxFiles: 2 });
+    const base = { kind: "event" as const, traceId: "a".repeat(32), spanId: "b".repeat(16), runId: "rotation-test", name: "checkpoint", attributes: { value: "x".repeat(35) } };
+    await recorder.record({ ...base, name: "one" });
+    await recorder.record({ ...base, name: "two" });
+    await recorder.record({ ...base, name: "three" });
+    const files = await readdir(dir);
+    assert.deepEqual(files.sort(), ["trace.jsonl", "trace.jsonl.1", "trace.jsonl.2"]);
+    for (const name of files) assert.ok((await readFile(join(dir, name), "utf8")).length <= 300);
+
+    const limited = new FlightRecorder({ file: join(dir, "small.jsonl"), maxFileBytes: 200 });
+    await assert.rejects(limited.record({ ...base, name: "too-large", attributes: { value: "x".repeat(500) } }), /larger than maxFileBytes/);
+    await limited.record({ kind: "event", traceId: base.traceId, spanId: base.spanId, runId: base.runId, name: "small" });
+    assert.equal((await readFile(join(dir, "small.jsonl"), "utf8")).trim().split("\n").length, 1);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
