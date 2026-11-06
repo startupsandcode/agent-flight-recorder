@@ -30,11 +30,12 @@ export interface ToolOptions { name?: string; attributes?: Record<string, unknow
 const DEFAULT_FILE = ".afr/traces.jsonl";
 const SECRET_KEY = /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|credential|cookie|private[_-]?key)/i;
 const TOKEN_VALUE = /\b(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi;
+const JSON_SECRET = /(["'])(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\1\s*:\s*(["'])[^"']*\3/gi;
 const KEY_VALUE = /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*(["']?)[^\s,;"']+\2/gi;
 
 export function redact(value: unknown, extraKeys: string[] = []): unknown {
   const sensitive = new RegExp(`(?:${[SECRET_KEY.source, ...extraKeys.map(escapeRegex)].join("|")})`, "i");
-  if (typeof value === "string") return value.replace(TOKEN_VALUE, "Bearer [REDACTED]").replace(KEY_VALUE, "$1=[REDACTED]");
+  if (typeof value === "string") return value.replace(JSON_SECRET, "$1$2$1: $3[REDACTED]$3").replace(TOKEN_VALUE, "Bearer [REDACTED]").replace(KEY_VALUE, "$1=[REDACTED]");
   if (Array.isArray(value)) return value.map((item) => redact(item, extraKeys));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sensitive.test(key) ? "[REDACTED]" : redact(item, extraKeys)]));
