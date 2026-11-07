@@ -57,7 +57,7 @@ The recorder rotates files at 5 MiB by default and keeps three rotated copies be
 
 ## Privacy and redaction
 
-Redaction is on by default. AFR replaces values for common sensitive keys such as `apiKey`, `authorization`, `password`, `secret`, and `accessToken`, including nested object fields. It also masks common bearer tokens and inline key/value credentials inside strings. Add application-specific keys with `new FlightRecorder({ redactedKeys: ["customerEmail"] })`.
+Redaction is on by default. AFR replaces values for common sensitive keys such as `apiKey`, `authorization`, `password`, `secret`, and `accessToken`, including nested object fields. It also masks bearer credentials, common token formats, and inline key/value credentials inside strings. Add application-specific keys with `new FlightRecorder({ redactedKeys: ["customerEmail"] })`, or mask a custom token format with `new FlightRecorder({ redactPatterns: [/cust-[A-Z0-9]{6}/g] })`. Each matched value is replaced with `[REDACTED]`.
 
 Redaction is best effort, not a guarantee that arbitrary sensitive text will be detected. Avoid recording prompts, user data, or raw tool payloads unless needed. Set `redact: false` only when you are comfortable writing unfiltered data to disk. Trace files are local and may contain operational details. Keep them out of version control; `.afr/` is ignored by default.
 

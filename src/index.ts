@@ -21,6 +21,8 @@ export interface RecorderOptions {
   file?: string;
   redact?: boolean;
   redactedKeys?: string[];
+  /** Additional patterns for application-specific secret formats. Matches are replaced with [REDACTED]. */
+  redactPatterns?: RegExp[];
   clock?: () => Date;
   idGenerator?: (bytes: number) => string;
   /** Maximum size of one JSONL file before rotating it. Defaults to 5 MiB. */
@@ -36,17 +38,26 @@ const SECRET_KEY = /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?to
 const TOKEN_VALUE = /\b(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi;
 const JSON_SECRET = /(["'])(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\1\s*:\s*(["'])[^"']*\3/gi;
 const KEY_VALUE = /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*(["']?)[^\s,;"']+\2/gi;
+const KNOWN_TOKENS = /\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AIza[0-9A-Za-z_-]{30,}|AKIA[0-9A-Z]{16})\b/g;
+const JWT = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 
-export function redact(value: unknown, extraKeys: string[] = []): unknown {
+export function redact(value: unknown, extraKeys: string[] = [], extraPatterns: RegExp[] = []): unknown {
   const sensitive = new RegExp(`(?:${[SECRET_KEY.source, ...extraKeys.map(escapeRegex)].join("|")})`, "i");
-  if (typeof value === "string") return value.replace(JSON_SECRET, "$1$2$1: $3[REDACTED]$3").replace(TOKEN_VALUE, "Bearer [REDACTED]").replace(KEY_VALUE, "$1=[REDACTED]");
-  if (Array.isArray(value)) return value.map((item) => redact(item, extraKeys));
+  if (typeof value === "string") {
+    let result = value.replace(JSON_SECRET, "$1$2$1: $3[REDACTED]$3").replace(TOKEN_VALUE, "Bearer [REDACTED]").replace(KEY_VALUE, "$1=[REDACTED]").replace(KNOWN_TOKENS, "[REDACTED]").replace(JWT, "[REDACTED]");
+    for (const pattern of extraPatterns) {
+      const flags = [...new Set(`${pattern.flags.replaceAll("y", "")}g`)].join("");
+      result = result.replace(new RegExp(pattern.source, flags), "[REDACTED]");
+    }
+    return result;
+  }
+  if (Array.isArray(value)) return value.map((item) => redact(item, extraKeys, extraPatterns));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sensitive.test(key) ? "[REDACTED]" : redact(item, extraKeys)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sensitive.test(key) ? "[REDACTED]" : redact(item, extraKeys, extraPatterns)]));
   }
   return value;
 }
-function escapeRegex(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function escapeRegex(value: string): string { return value.replace(/[.*+?^\x24{}()|[\]\\]/g, "\\$&"); }
 function hexId(bytes: number): string { return randomBytes(bytes).toString("hex"); }
 function errorInfo(error: unknown): { name: string; message: string } {
   if (error instanceof Error) return { name: error.name, message: error.message };
@@ -57,6 +68,7 @@ export class FlightRecorder {
   readonly file: string;
   private readonly shouldRedact: boolean;
   private readonly extraRedactedKeys: string[];
+  private readonly extraRedactPatterns: RegExp[];
   private readonly clock: () => Date;
   private readonly id: (bytes: number) => string;
   private readonly maxFileBytes: number;
@@ -67,6 +79,7 @@ export class FlightRecorder {
     this.file = resolve(options.file ?? DEFAULT_FILE);
     this.shouldRedact = options.redact ?? true;
     this.extraRedactedKeys = options.redactedKeys ?? [];
+    this.extraRedactPatterns = options.redactPatterns ?? [];
     this.clock = options.clock ?? (() => new Date());
     this.id = options.idGenerator ?? hexId;
     this.maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
@@ -98,8 +111,8 @@ export class FlightRecorder {
       schemaVersion: 1,
       timestamp: input.timestamp ?? this.clock().toISOString(),
       ...input,
-      ...(input.attributes && this.shouldRedact ? { attributes: redact(input.attributes, this.extraRedactedKeys) as Record<string, unknown> } : {}),
-      ...(input.error ? { error: this.shouldRedact ? redact(input.error, this.extraRedactedKeys) as { name: string; message: string } : input.error } : {})
+      ...(input.attributes && this.shouldRedact ? { attributes: redact(input.attributes, this.extraRedactedKeys, this.extraRedactPatterns) as Record<string, unknown> } : {}),
+      ...(input.error ? { error: this.shouldRedact ? redact(input.error, this.extraRedactedKeys, this.extraRedactPatterns) as { name: string; message: string } : input.error } : {})
     };
     const line = `${JSON.stringify(event)}\n`;
     this.writeQueue = this.writeQueue.catch(() => undefined).then(async () => {
