@@ -31,6 +31,12 @@ test("CLI lists, finds, and explains a failed run from a custom trace file", asy
     const latest = runCli(["show", "latest", "--file", file], dir);
     assert.match(latest, /checkout-agent/);
 
+    const otlpFile = join(dir, "trace.otlp.json");
+    runCli(["export-otlp", "--file", file, "--out", otlpFile], dir);
+    const otlp = JSON.parse(await (await import("node:fs/promises")).readFile(otlpFile, "utf8"));
+    assert.equal(otlp.resourceSpans[0].scopeSpans[0].spans.length, 2);
+    assert.equal(otlp.resourceSpans[0].scopeSpans[0].spans[0].status.code, "STATUS_CODE_ERROR");
+
     assert.throws(() => runCli(["show", "missing-run", file], dir), /Run not found/);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -41,6 +47,7 @@ test("CLI help works without a trace file", () => {
   const output = runCli(["--help"], resolve("."));
   assert.match(output, /afr list/);
   assert.match(output, /afr failures/);
+  assert.match(output, /afr export-otlp/);
 });
 
 test("CLI explains malformed JSON with its line number", async () => {

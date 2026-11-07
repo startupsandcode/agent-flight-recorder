@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { TraceEvent } from "./index.js";
+import { toOtlpTrace } from "./otlp.js";
 
 function help(): void {
   console.log(`Agent Flight Recorder v0.1
@@ -10,6 +11,7 @@ Usage:
   afr list [--file <path>]             List recorded runs
   afr show <run-id|latest> [--file <path>]  Show a run timeline
   afr failures [--file <path>]         List failed tool calls
+  afr export-otlp [--file <path>] [--out <path>]  Export OTLP JSON
 
 Default file: .afr/traces.jsonl`);
 }
@@ -53,11 +55,24 @@ async function main(): Promise<void> {
     if (!selectedFile) throw new Error("--file requires a path");
     file = selectedFile;
     args.splice(fileFlag, 2);
-  } else if (args.length > (command === "show" ? 1 : 0)) {
+  } else if (args.length > (command === "show" ? 1 : 0) && !(command === "export-otlp" && args.includes("--out"))) {
     // Keep accepting the original positional file argument for v0.1 users.
     file = args.pop()!;
   }
+  const outFlag = args.findIndex((arg) => arg === "--out");
+  let outputFile: string | undefined;
+  if (outFlag !== -1) {
+    outputFile = args[outFlag + 1];
+    if (!outputFile) throw new Error("--out requires a path");
+    args.splice(outFlag, 2);
+  }
   const events = await load(file);
+  if (command === "export-otlp") {
+    const json = `${JSON.stringify(toOtlpTrace(events), null, 2)}\n`;
+    if (outputFile) await writeFile(resolve(outputFile), json, "utf8");
+    else process.stdout.write(json);
+    return;
+  }
   if (command === "list") return summary(events);
   if (command === "failures") {
     const failures = events.filter((e) => e.kind === "tool.error");
