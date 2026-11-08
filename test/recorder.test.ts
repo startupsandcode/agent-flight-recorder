@@ -27,6 +27,8 @@ test("redacts secret keys and credentials embedded in strings by default", async
     apiKey: "[REDACTED]", nested: { note: "Authorization: Bearer [REDACTED]" }
   });
   assert.equal(redact('upstream error: {"api_key": "topsecret"}'), 'upstream error: {"api_key": "[REDACTED]"}');
+  assert.equal(redact("tokens sk-proj-12345678901234567890 ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"), "tokens [REDACTED] [REDACTED]");
+  assert.equal(redact("custom-session=cust-A1B2C3", [], [/cust-[A-Z0-9]{6}/g]), "custom-session=[REDACTED]");
   const dir = await mkdtemp(join(tmpdir(), "afr-"));
   try {
     const file = join(dir, "trace.jsonl");
@@ -34,6 +36,18 @@ test("redacts secret keys and credentials embedded in strings by default", async
     const text = await readFile(file, "utf8");
     assert.doesNotMatch(text, /do-not-store|verysecret/);
     assert.match(text, /\[REDACTED\]/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("applies custom secret patterns to recorded error messages", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "afr-custom-redact-"));
+  try {
+    const file = join(dir, "trace.jsonl");
+    const recorder = new FlightRecorder({ file, redactPatterns: [/cust-[A-Z0-9]{6}/g] });
+    await assert.rejects(recorder.run({ name: "custom-secret" }, (run) => run.tool("request", () => { throw new Error("Rejected cust-X7Q2P9"); })), /Rejected cust-X7Q2P9/);
+    const contents = await readFile(file, "utf8");
+    assert.doesNotMatch(contents, /cust-X7Q2P9/);
+    assert.match(contents, /Rejected \[REDACTED\]/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
